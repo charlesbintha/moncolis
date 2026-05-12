@@ -12,14 +12,17 @@ export default function LoginPage() {
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [phone, setPhone] = useState('');
   const [otpCode, setOtpCode] = useState('');
+  const [devOtp, setDevOtp] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await authApi.sendLoginOtp(phone);
-      toast.success('Code OTP envoyé par SMS');
+      const { data } = await authApi.sendLoginOtp(phone);
+      const code = data?.data?.otpCode as string | undefined;
+      setDevOtp(code ?? null);
+      toast.success(code ? `Code OTP : ${code}` : 'Code OTP envoyé');
       setStep('otp');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Erreur lors de l\'envoi du SMS');
@@ -99,6 +102,21 @@ export default function LoginPage() {
               <p className="text-sm text-gray-600">
                 Code envoyé au <strong>{phone}</strong>
               </p>
+              {devOtp && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="text-xs font-medium text-amber-700 uppercase tracking-wide">
+                    Code OTP (mode test)
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setOtpCode(devOtp)}
+                    className="mt-1 text-2xl font-mono font-bold text-amber-900 tracking-widest hover:underline"
+                    title="Cliquer pour remplir automatiquement"
+                  >
+                    {devOtp}
+                  </button>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Code OTP (6 chiffres)
@@ -120,7 +138,7 @@ export default function LoginPage() {
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 Se connecter
               </button>
-              <button type="button" onClick={() => { setStep('phone'); setOtpCode(''); }}
+              <button type="button" onClick={() => { setStep('phone'); setOtpCode(''); setDevOtp(null); }}
                 className="w-full text-sm text-gray-500 hover:text-gray-700 text-center">
                 ← Changer de numéro
               </button>
