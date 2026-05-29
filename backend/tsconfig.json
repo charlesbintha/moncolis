@@ -9,6 +9,7 @@
     "target": "ES2021",
     "sourceMap": true,
     "outDir": "./dist",
+    "rootDir": "./src",
     "baseUrl": "./",
     "incremental": true,
     "skipLibCheck": true,
@@ -31,5 +32,7 @@
       "@notifications/*": ["src/notifications/*"],
       "@common/*": ["src/common/*"]
     }
-  }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "prisma", "test", "**/*.spec.ts"]
 }
