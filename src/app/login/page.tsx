@@ -5,7 +5,11 @@ import { useRouter } from 'next/navigation';
 import { authApi } from '@/lib/api';
 import Cookies from 'js-cookie';
 import toast from 'react-hot-toast';
-import { Package, Loader2, Phone, KeyRound } from 'lucide-react';
+import { Package, Loader2, Phone, KeyRound, Zap } from 'lucide-react';
+
+const TEST_ACCOUNTS = [
+  { phone: '+221700000000', label: 'Admin ColiSN', role: 'ADMIN' },
+];
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,13 +19,14 @@ export default function LoginPage() {
   const [devOtp, setDevOtp] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleSendOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const requestOtp = async (targetPhone: string) => {
     setLoading(true);
     try {
-      const { data } = await authApi.sendLoginOtp(phone);
+      const { data } = await authApi.sendLoginOtp(targetPhone);
       const code = data?.data?.otpCode as string | undefined;
+      setPhone(targetPhone);
       setDevOtp(code ?? null);
+      if (code) setOtpCode(code);
       toast.success(code ? `Code OTP : ${code}` : 'Code OTP envoyé');
       setStep('otp');
     } catch (err: any) {
@@ -29,6 +34,11 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await requestOtp(phone);
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -96,6 +106,33 @@ export default function LoginPage() {
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 Envoyer le code OTP
               </button>
+
+              {/* Comptes de test — à retirer en production */}
+              <div className="pt-4 mt-2 border-t border-dashed border-gray-200">
+                <p className="text-xs font-medium text-amber-700 uppercase tracking-wide mb-2">
+                  Connexion rapide (mode test)
+                </p>
+                <div className="space-y-2">
+                  {TEST_ACCOUNTS.map((acc) => (
+                    <button
+                      key={acc.phone}
+                      type="button"
+                      onClick={() => requestOtp(acc.phone)}
+                      disabled={loading}
+                      className="w-full flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left hover:bg-amber-100 transition disabled:opacity-50"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-amber-600" />
+                        <span className="text-sm">
+                          <span className="font-semibold text-amber-900">{acc.label}</span>
+                          <span className="ml-2 font-mono text-xs text-amber-700">{acc.phone}</span>
+                        </span>
+                      </span>
+                      <span className="text-xs font-medium text-amber-700">→ obtenir OTP</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </form>
           ) : (
             <form onSubmit={handleLogin} className="space-y-4">
