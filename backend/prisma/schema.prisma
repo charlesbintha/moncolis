@@ -1,0 +1,438 @@
+// =============================================================================
+// COLISN - Schéma Prisma
+// Application de covoiturage de colis pour le Sénégal
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum UserRole {
+  SENDER
+  CARRIER
+  BOTH
+  ADMIN
+}
+
+enum TripStatus {
+  ACTIVE
+  FULL
+  COMPLETED
+  CANCELLED
+}
+
+enum VehicleType {
+  CAR
+  MOTORCYCLE
+  BUS
+  MINIBUS
+  TRUCK
+  OTHER
+}
+
+enum ParcelStatus {
+  OPEN
+  MATCHED
+  BOOKED
+  CANCELLED
+}
+
+enum BookingStatus {
+  PENDING
+  ACCEPTED
+  REFUSED
+  PARCEL_HANDED
+  IN_TRANSIT
+  DELIVERED
+  CONFIRMED
+  DISPUTED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  WAVE
+  ORANGE_MONEY
+  CARD
+}
+
+enum PaymentStatus {
+  PENDING
+  HELD
+  RELEASED
+  REFUNDED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+}
+
+enum NotificationType {
+  BOOKING_REQUEST
+  BOOKING_ACCEPTED
+  BOOKING_REFUSED
+  PARCEL_HANDED
+  IN_TRANSIT
+  DELIVERED
+  PAYMENT_RECEIVED
+  PAYMENT_RELEASED
+  DISPUTE_OPENED
+  DISPUTE_RESOLVED
+  REVIEW_RECEIVED
+  TRIP_MATCH
+  PARCEL_MATCH
+  OTP
+  SYSTEM
+}
+
+// =============================================================================
+// MODÈLE USER
+// =============================================================================
+
+model User {
+  id          String   @id @default(cuid())
+  phone       String   @unique
+  email       String?  @unique
+  fullName    String
+  role        UserRole @default(SENDER)
+  avatarUrl   String?
+
+  // Vérification identité
+  cniVerified Boolean  @default(false)
+  cniFrontUrl String?
+  cniBackUrl  String?
+  cniVerifiedAt DateTime?
+  cniVerifiedBy String?  // ID de l'admin qui a validé
+
+  // Statistiques
+  rating      Float    @default(0)
+  ratingCount Int      @default(0)
+  totalTrips  Int      @default(0)   // En tant que transporteur
+  totalParcels Int     @default(0)   // En tant qu'expéditeur
+
+  // Wallet
+  walletBalance Int    @default(0)   // En FCFA
+
+  // Statut du compte
+  isActive    Boolean  @default(true)
+  isBanned    Boolean  @default(false)
+  bannedAt    DateTime?
+  bannedReason String?
+  bannedBy    String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  refreshTokens RefreshToken[]
+  otpCodes      OTPCode[]
+  tripsAsCarrier Trip[]           @relation("CarrierTrips")
+  parcelRequests ParcelRequest[]  @relation("SenderParcels")
+  bookingsAsSender  Booking[]     @relation("SenderBookings")
+  bookingsAsCarrier Booking[]     @relation("CarrierBookings")
+  reviewsGiven    Review[]        @relation("ReviewerReviews")
+  reviewsReceived Review[]        @relation("ReviewedReviews")
+  disputesOpened  Dispute[]       @relation("DisputeOpener")
+  disputesResolved Dispute[]      @relation("DisputeResolver")
+  notifications   Notification[]
+  adminCniValidations User[]      @relation("CniValidator")
+  validatedBy     User?           @relation("CniValidator", fields: [cniVerifiedBy], references: [id])
+
+  @@map("users")
+}
+
+// =============================================================================
+// REFRESH TOKENS
+// =============================================================================
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// =============================================================================
+// OTP CODES
+// =============================================================================
+
+model OTPCode {
+  id        String   @id @default(cuid())
+  phone     String
+  code      String
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  purpose   String   // "REGISTER" | "LOGIN" | "DELIVERY" | "RESET"
+  attempts  Int      @default(0)
+  isUsed    Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([phone, purpose])
+  @@index([userId])
+  @@map("otp_codes")
+}
+
+// =============================================================================
+// MODÈLE TRIP (Annonce transporteur)
+// =============================================================================
+
+model Trip {
+  id              String      @id @default(cuid())
+  carrierId       String
+  carrier         User        @relation("CarrierTrips", fields: [carrierId], references: [id])
+
+  originCity      String
+  destinationCity String
+  departureDate   DateTime
+  availableKg     Float
+  bookedKg        Float       @default(0)
+  pricePerKg      Int         // En FCFA
+
+  vehicleType     VehicleType @default(OTHER)
+  description     String?
+  status          TripStatus  @default(ACTIVE)
+
+  // Coordonnées optionnelles pour les points de rendez-vous
+  originDetail    String?     // Quartier/lieu précis de départ
+  destinationDetail String?   // Quartier/lieu précis d'arrivée
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  bookings        Booking[]
+
+  @@index([originCity, destinationCity, departureDate])
+  @@index([carrierId])
+  @@index([status])
+  @@map("trips")
+}
+
+// =============================================================================
+// MODÈLE PARCEL REQUEST (Annonce expéditeur)
+// =============================================================================
+
+model ParcelRequest {
+  id              String       @id @default(cuid())
+  senderId        String
+  sender          User         @relation("SenderParcels", fields: [senderId], references: [id])
+
+  originCity      String
+  destinationCity String
+  desiredDate     DateTime
+  weightKg        Float
+  description     String?
+  photoUrls       String[]     @default([])
+  declaredValue   Int?         // Valeur déclarée en FCFA
+
+  status          ParcelStatus @default(OPEN)
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relations
+  bookings        Booking[]
+
+  @@index([originCity, destinationCity, desiredDate])
+  @@index([senderId])
+  @@index([status])
+  @@map("parcel_requests")
+}
+
+// =============================================================================
+// MODÈLE BOOKING
+// =============================================================================
+
+model Booking {
+  id              String        @id @default(cuid())
+  tripId          String
+  trip            Trip          @relation(fields: [tripId], references: [id])
+  parcelRequestId String
+  parcelRequest   ParcelRequest @relation(fields: [parcelRequestId], references: [id])
+
+  senderId        String
+  sender          User          @relation("SenderBookings", fields: [senderId], references: [id])
+  carrierId       String
+  carrier         User          @relation("CarrierBookings", fields: [carrierId], references: [id])
+
+  // Montants en FCFA
+  weightKg        Float
+  totalAmount     Int           // Montant total payé
+  commission      Int           // 12% pour la plateforme
+  carrierAmount   Int           // totalAmount - commission
+
+  // Code de livraison alphanumérique 6 caractères
+  deliveryCode    String        @unique
+
+  // Photo du colis au moment de la remise
+  parcelPhotoUrl  String?
+
+  status          BookingStatus @default(PENDING)
+
+  // Timestamps des changements de statut
+  acceptedAt      DateTime?
+  refusedAt       DateTime?
+  parcelHandedAt  DateTime?
+  inTransitAt     DateTime?
+  deliveredAt     DateTime?
+  confirmedAt     DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+
+  // Délai d'expiration pour l'acceptation (2h)
+  acceptDeadline  DateTime
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  payment         Payment?
+  review          Review?
+  dispute         Dispute?
+
+  @@index([tripId])
+  @@index([parcelRequestId])
+  @@index([senderId])
+  @@index([carrierId])
+  @@index([status])
+  @@map("bookings")
+}
+
+// =============================================================================
+// MODÈLE PAYMENT
+// =============================================================================
+
+model Payment {
+  id          String        @id @default(cuid())
+  bookingId   String        @unique
+  booking     Booking       @relation(fields: [bookingId], references: [id])
+
+  amount      Int           // En FCFA
+  method      PaymentMethod
+  status      PaymentStatus @default(PENDING)
+
+  // Référence fournisseur de paiement (PayDunya / Stripe)
+  providerRef String?
+  providerData Json?        // Données brutes du fournisseur
+
+  // Timestamps
+  heldAt      DateTime?
+  releasedAt  DateTime?
+  refundedAt  DateTime?
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([bookingId])
+  @@index([status])
+  @@map("payments")
+}
+
+// =============================================================================
+// MODÈLE REVIEW
+// =============================================================================
+
+model Review {
+  id          String   @id @default(cuid())
+  bookingId   String   @unique
+  booking     Booking  @relation(fields: [bookingId], references: [id])
+
+  reviewerId  String
+  reviewer    User     @relation("ReviewerReviews", fields: [reviewerId], references: [id])
+  reviewedId  String
+  reviewed    User     @relation("ReviewedReviews", fields: [reviewedId], references: [id])
+
+  rating      Int      // 1 à 5
+  comment     String?
+
+  // Délai : 72h après confirmation livraison
+  expiresAt   DateTime
+
+  createdAt   DateTime @default(now())
+
+  @@index([bookingId])
+  @@index([reviewerId])
+  @@index([reviewedId])
+  @@map("reviews")
+}
+
+// =============================================================================
+// MODÈLE DISPUTE
+// =============================================================================
+
+model Dispute {
+  id            String        @id @default(cuid())
+  bookingId     String        @unique
+  booking       Booking       @relation(fields: [bookingId], references: [id])
+
+  openedById    String
+  openedBy      User          @relation("DisputeOpener", fields: [openedById], references: [id])
+
+  reason        String
+  description   String?
+  evidenceUrls  String[]      @default([])
+
+  status        DisputeStatus @default(OPEN)
+
+  // Résolution
+  resolution    String?
+  resolvedById  String?
+  resolvedBy    User?         @relation("DisputeResolver", fields: [resolvedById], references: [id])
+  resolvedAt    DateTime?
+
+  // Remboursement partiel ou total
+  refundAmount  Int?          // En FCFA, null = pas de remboursement
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([bookingId])
+  @@index([openedById])
+  @@index([status])
+  @@map("disputes")
+}
+
+// =============================================================================
+// MODÈLE NOTIFICATION
+// =============================================================================
+
+model Notification {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type        NotificationType
+  title       String
+  body        String
+  data        Json?            // Données supplémentaires (bookingId, etc.)
+
+  isRead      Boolean          @default(false)
+  readAt      DateTime?
+
+  // Statut d'envoi push/SMS
+  pushSent    Boolean          @default(false)
+  smsSent     Boolean          @default(false)
+
+  createdAt   DateTime         @default(now())
+
+  @@index([userId, isRead])
+  @@index([userId])
+  @@map("notifications")
+}
